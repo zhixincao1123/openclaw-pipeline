@@ -104,14 +104,14 @@ function buildRestoreContext({ rulePath, memoryDirs, docDirs }) {
   }
 
   const combined = parts.join('\n\n');
+  const truncated = combined.length > MAX_TOTAL_CHARS;
   return {
     ok: true,
     rulesLoaded,
-    contextText: combined,
+    contextText: truncated ? combined.slice(0, MAX_TOTAL_CHARS) + '\n…[恢复上下文已截断]' : combined,
     charCount: combined.length,
-    truncated: combined.length > MAX_TOTAL_CHARS ? combined.slice(0, MAX_TOTAL_CHARS) + '\n…[恢复上下文已截断]' : combined,
     totalChars: combined.length,
-    truncated: combined.length > MAX_TOTAL_CHARS,
+    truncated,
   };
 }
 

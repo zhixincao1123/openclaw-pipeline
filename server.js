@@ -232,7 +232,7 @@ const server = http.createServer(async (req, res) => {
     if (useRestore) {
       const docDirs = dir ? [dir, ...DEFAULT_DOC_DIRS] : []; // dir 为空就不注入项目历史，只注入规则+记忆库
       restoreCtx = buildRestoreContext({ rulePath: rulePath || DEFAULT_RULE, memoryDirs: DEFAULT_MEMORY, docDirs });
-      ctxText = restoreCtx.truncated ? restoreCtx.truncated : restoreCtx.contextText;
+      ctxText = restoreCtx.contextText;
       contextFiles = (restoreCtx.contextText.match(/### /g) || []).length;
     } else {
       const ctx = dir ? readContext(dir) : null;
