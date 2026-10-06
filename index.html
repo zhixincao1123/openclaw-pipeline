@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OpenClaw 角色流水线</title>
+<style>
+  :root { --bg:#0f1117; --card:#171a23; --line:#262b38; --txt:#e6e9ef; --mut:#8a93a6; --acc:#5b8cff; --ok:#37d39b; --bad:#ff6b6b; --warn:#ffcf5b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:17px; margin:0; font-weight:600; }
+  header .hint { color:var(--mut); font-size:12px; }
+  main { max-width:980px; margin:0 auto; padding:20px 24px 60px; }
+  .task { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:18px; }
+  .task label { display:block; color:var(--mut); font-size:12px; margin-bottom:8px; }
+  textarea { width:100%; min-height:84px; resize:vertical; background:#0c0e14; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font:inherit; }
+  .actions { margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; }
+  button { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:9px 16px; font:inherit; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--txt); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  .roles { display:grid; gap:14px; }
+  .role { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .role .head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .role .name { font-weight:600; }
+  .role .desc { color:var(--mut); font-size:12px; }
+  .role select { background:#0c0e14; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font:inherit; margin-left:auto; }
+  .role .runone { background:transparent; border:1px solid var(--line); color:var(--txt); padding:6px 12px; }
+  .status { font-size:12px; margin-left:8px; }
+  .s-wait { color:var(--mut); } .s-run { color:var(--acc); } .s-ok { color:var(--ok); } .s-bad { color:var(--bad); }
+  .out { margin-top:10px; background:#0c0e14; border:1px solid var(--line); border-radius:8px; padding:10px 12px; white-space:pre-wrap; font-size:13px; max-height:240px; overflow:auto; display:none; }
+  .out.show { display:block; }
+  .meta { color:var(--mut); font-size:11px; margin-top:6px; }
+  .summary { margin-top:22px; padding:16px; background:var(--card); border:1px solid var(--line); border-radius:12px; display:none; }
+  .summary.show { display:block; }
+  .summary b { color:var(--acc); }
+  .gate-warn { background:#2a2113; border:1px solid #5a4716; color:var(--warn); padding:12px 14px; border-radius:10px; margin-bottom:16px; font-size:13px; }
+  .inline-label { display:flex; align-items:center; gap:6px; color:var(--mut); font-size:12px; }
+  .path-input { background:#0c0e14; color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 8px; font:inherit; min-width:220px; }
+  .modal { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:50; }
+  .modal-box { background:var(--card); border:1px solid var(--line); border-radius:12px; width:560px; max-height:70vh; display:flex; flex-direction:column; }
+  .modal-head { padding:12px 16px; border-bottom:1px solid var(--line); font-weight:600; display:flex; justify-content:space-between; align-items:center; }
+  .modal-x { cursor:pointer; color:var(--mut); font-size:16px; }
+  .modal-list { padding:8px; overflow:auto; }
+  .modal-item { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 12px; border-radius:8px; cursor:pointer; font-size:13px; }
+  .modal-item:hover { background:rgba(91,140,255,.12); }
+  .modal-item .clear { color:var(--mut); font-size:12px; cursor:pointer; }
+  .modal-item .clear:hover { color:var(--bad); }
+  .interaction { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:18px; }
+  .interaction-head { font-weight:600; margin-bottom:10px; }
+  .interaction textarea { min-height:60px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OpenClaw 角色流水线</h1>
+  <span class="hint">审需求 → 开发 → 测试 → 提交 → 考试，按角色选模型省 token</span>
+</header>
+<main>
+  <div class="gate-warn" id="gateWarn">
+    ⚠ 后端直连一个 <b>OpenAI 兼容网关</b>（默认 <code>http://127.0.0.1:8080</code>）。点运行若报 "gateway unreachable"，请确认该网关已启动、且 <code>GATEWAY_BASE</code> 配置正确。可用模型由网关的 <code>/v1/models</code> 决定。
+  </div>
+
+  <section class="task">
+    <label>任务输入（会传给每个角色，可含上下文/代码/需求）</label>
+    <textarea id="taskInput" placeholder="例如：实现一个用户登录接口，支持手机号+验证码，返回 JWT..."></textarea>
+    <div class="actions">
+      <label class="inline-label">规则文件<input id="rulePath" class="path-input" value="" placeholder="可选：规则文件路径，如 /path/to/rules.md" /></label>
+      <label class="inline-label">记忆目录<input id="ctxDir" class="path-input" value="" placeholder="留空=只恢复规则+Claude记忆库" />
+        <button id="ctxPick" class="ghost" type="button">选择…</button>
+      </label>
+      <label class="inline-label"><button id="ctxBtn" class="ghost">检查恢复</button></label>
+      <button id="runAll">▶ 运行整条流水线</button>
+      <button id="stopBtn" class="ghost" disabled>■ 停止</button>
+    </div>
+    <div class="meta" id="ctxMeta"></div>
+  </section>
+
+  <div class="modal" id="dirModal" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-head">选择历史记录目录（RECORD_DIR 下）<span class="modal-x" id="dirModalClose">✕</span></div>
+      <div class="modal-list" id="dirList"></div>
+    </div>
+  </div>
+
+  <section class="roles" id="roles"></section>
+
+  <section class="summary" id="summary"></section>
+  <section class="interaction" id="interaction" style="display:none;">
+    <div class="interaction-head">当前环节完成，等你确认</div>
+    <label>反馈（可选）：<textarea id="redoInput" placeholder="例如：评审太宽泛，请具体到要改哪个文件哪一行；或直接说跳过本环节"></textarea></label>
+    <div class="actions">
+      <button id="continueBtn" class="ghost">继续下一步</button>
+      <button id="redoBtn" class="ghost">反馈并重做本环节</button>
+      <button id="stopChainBtn" class="ghost">停止流水线</button>
+    </div>
+  </section>
+</main>
+
+<script>
+let MODELS = [];   // 由 /api/models 动态填充（来自上游 OpenAI 兼容网关）
+const CFG = { rulePath: '', recordDir: '', modelFast: '', modelStrong: '' };  // 由 /api/config 填充
+const ROLES = [
+  { key:'review', name:'① 需求评审', model:'', desc:'审需求/边界/风险，输出评审意见' },
+  { key:'dev',    name:'② 开发实现', model:'', desc:'按评审写代码/实现功能' },
+  { key:'test',   name:'③ 测试验证', model:'', desc:'生成用例/自测要点' },
+  { key:'commit', name:'④ 提交',     model:'', desc:'整理改动、写提交信息' },
+  { key:'exam',   name:'⑤ 考试验收', model:'', desc:'按标准严格验收、给结论' },
+];
+
+const estTokens = (s) => Math.ceil((s || '').length / 4);
+let stopFlag = false;
+let abortCtl = null;
+
+function runState(r, st, text, meta) {
+  const el = document.getElementById('st-' + r.key);
+  const out = document.getElementById('out-' + r.key);
+  el.className = 'status ' + st.cls;
+  el.textContent = st.text;
+  out.className = 'out show';
+  out.textContent = text || '';
+  const me = document.getElementById('meta-' + r.key);
+  me.textContent = meta || '';
+}
+
+function render() {
+  const wrap = document.getElementById('roles');
+  wrap.innerHTML = '';
+  ROLES.forEach((r, i) => {
+    const div = document.createElement('div');
+    div.className = 'role';
+    div.innerHTML = `
+      <div class="head">
+        <span class="name">${r.name}</span>
+        <span class="desc">${r.desc}</span>
+        <select data-key="${r.key}">
+          ${MODELS.map(m => `<option value="${m.id}" ${m.id===r.model?'selected':''}>${m.name||m.id}</option>`).join('')}
+        </select>
+        <button class="runone" data-i="${i}">单独运行</button>
+        <span class="status s-wait" id="st-${r.key}">等待</span>
+      </div>
+      <div class="out" id="out-${r.key}"></div>
+      <div class="meta" id="meta-${r.key}"></div>
+    `;
+    wrap.appendChild(div);
+  });
+  wrap.querySelectorAll('.runone').forEach(b => b.onclick = () => runOne(parseInt(b.dataset.i), true));
+}
+
+async function runOne(i, single) {
+  const r = ROLES[i];
+  const model = document.querySelector(`select[data-key="${r.key}"]`).value;
+  const task = document.getElementById('taskInput').value.trim();
+  if (!task) { alert('先填写任务输入'); return; }
+  const dir = document.getElementById('ctxDir').value.trim();
+  const rulePath = document.getElementById('rulePath').value.trim();
+  runState(r, { cls:'s-run', text:'运行中…' }, '', '');
+  try {
+    const resp = await fetch('/api/run', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ role:r.key, name:r.name, model, task, dir, rulePath })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      runState(r, { cls:'s-ok', text:'完成' }, data.text, `model=${data.model} · ≈${estTokens(task)+estTokens(data.text)} tokens`);
+    } else {
+      runState(r, { cls:'s-bad', text:'失败' }, '错误：' + (data.error || 'unknown') + (data.raw ? '\n\n' + data.raw : ''), '');
+    }
+  } catch (e) {
+    runState(r, { cls:'s-bad', text:'失败' }, '请求异常：' + e.message + '\n（网络/解析错误，或上游 OpenAI 兼容网关未响应——请确认 GATEWAY_BASE 指向的服务已启动）', '');
+  }
+}
+
+// 逐步流水线状态
+let pipelineState = null;
+
+async function callChain(body) {
+  const resp = await fetch('/api/chain', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  const data = await resp.json();
+  if (!data.ok) throw new Error(data.error || 'chain failed');
+  return data;
+}
+
+async function runStep(state, begin, goal, redoFeedback) {
+  const r = state.steps[begin];
+  state.lastIndex = begin;
+  runState(r, { cls:'s-run', text:'运行中…' }, '', '');
+  const body = {
+    task: state.task, dir: state.dir, rulePath: state.rulePath,
+    useRestore: true, steps: state.steps, begin, goal,
+    upstream: state.upstream, redoFeedback: redoFeedback || ''
+  };
+  try {
+    const data = await callChain(body);
+    if (data.invalid) {
+      runState(r, { cls:'s-bad', text:'失败' }, '错误：' + (data.result ? data.result.error : '无效产出') + '\n\n' + (data.result ? data.result.text : ''), '');
+      showInteraction(r, data.result, true);
+      document.getElementById('runAll').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+      return;
+    }
+    const rr = data.result;
+    runState(r, { cls:'s-ok', text:'完成' }, rr.text, `model=${rr.model} · ≈${estTokens(state.task)+estTokens(rr.text)} tokens`);
+    // 重做/重跑同一环节：先移除该环节旧产出，避免下游看到两版
+    const oldPos = state.upstream.findIndex(u => u.name === r.name);
+    if (oldPos >= 0) state.upstream.splice(oldPos, 1);
+    state.upstream.push({ name: r.name, text: rr.text.slice(0, 6000) });
+    if (data.done) {
+      const sum = document.getElementById('summary'); sum.className = 'summary show';
+      sum.innerHTML = '流水线完成' + (data.saved && data.saved.ok ? ` · 已自动记录到 <b>${data.saved.dir}</b>` : '');
+      hideInteraction();
+      document.getElementById('runAll').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+      return;
+    }
+    showInteraction(r, rr, false);
+  } catch (e) {
+    runState(r, { cls:'s-bad', text:'失败' }, '请求异常：' + e.message, '');
+    showInteraction(r, null, true);
+    document.getElementById('runAll').disabled = false;
+    document.getElementById('stopBtn').disabled = true;
+  }
+}
+
+function showInteraction(r, result, invalid) {
+  const box = document.getElementById('interaction');
+  box.style.display = 'block';
+  document.getElementById('interaction').querySelector('.interaction-head').textContent =
+    (invalid ? '⚠ 该环节失败/产出无效，请处理' : `当前环节【${r.name}】完成，请确认`);
+  document.getElementById('redoInput').value = '';
+  document.getElementById('continueBtn').style.display = invalid ? 'none' : 'inline-block';
+  document.getElementById('redoBtn').style.display = 'inline-block';
+  document.getElementById('stopChainBtn').style.display = 'inline-block';
+}
+
+function hideInteraction() {
+  document.getElementById('interaction').style.display = 'none';
+}
+
+async function runAll() {
+  if (stopFlag) return;
+  const task = document.getElementById('taskInput').value.trim();
+  if (!task) { alert('先填写任务输入'); return; }
+  const dir = document.getElementById('ctxDir').value.trim();
+  const rulePath = document.getElementById('rulePath').value.trim();
+  stopFlag = false;
+  abortCtl = null;
+  document.getElementById('stopBtn').disabled = false;
+  document.getElementById('runAll').disabled = true;
+  const sum = document.getElementById('summary'); sum.className = 'summary show'; sum.innerHTML = '';
+  ROLES.forEach(r => runState(r, { cls:'s-wait', text:'等待' }, '', ''));
+  pipelineState = {
+    task, dir, rulePath, upstream: [],
+    steps: ROLES.map(r => ({ key:r.key, name:r.name, model:document.querySelector(`select[data-key="${r.key}"]`).value, desc:r.desc }))
+  };
+  await runStep(pipelineState, 0, 0, '');
+}
+
+document.getElementById('continueBtn').onclick = () => {
+  if (!pipelineState) return;
+  const next = (pipelineState.lastIndex ?? -1) + 1;
+  if (next >= pipelineState.steps.length) { hideInteraction(); return; }
+  runStep(pipelineState, next, next, '');
+};
+document.getElementById('redoBtn').onclick = () => {
+  if (!pipelineState) return;
+  const idx = pipelineState.lastIndex;
+  if (idx == null || idx < 0) return;
+  const feedback = document.getElementById('redoInput').value.trim();
+  // runStep 内部会替换同名旧产出
+  runStep(pipelineState, idx, idx, feedback);
+};
+document.getElementById('stopChainBtn').onclick = () => {
+  hideInteraction();
+  document.getElementById('runAll').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  const sum = document.getElementById('summary'); sum.className='summary show';
+  sum.innerHTML = '流水线已停止，未自动记录（停止不算任务完成）';
+};
+
+document.getElementById('runAll').onclick = runAll;
+document.getElementById('stopBtn').onclick = () => {
+  stopFlag = true;
+  if (abortCtl) abortCtl.abort();
+};
+document.getElementById('ctxBtn').onclick = async () => {
+  const dir = document.getElementById('ctxDir').value.trim();
+  const rulePath = document.getElementById('rulePath').value.trim();
+  const meta = document.getElementById('ctxMeta');
+  meta.textContent = '检查中…';
+  try {
+    const resp = await fetch('/api/restore', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ dir, rulePath }) });
+    const d = await resp.json();
+    meta.textContent = d.ok
+      ? `✓ 规则${d.rulesLoaded ? '已读' : '未读'} · 记忆库 ${d.memoryCount} 个 · 项目历史 ${d.docCount} 个目录 · 共 ${d.totalChars} 字符${d.truncated ? '（已截断）' : ''}`
+      : ('✗ ' + d.error);
+  } catch (e) { meta.textContent = '检查异常：' + e.message; }
+};
+
+// 记忆目录弹出框选择
+const dirModal = document.getElementById('dirModal');
+const dirList = document.getElementById('dirList');
+function closeDirModal() { dirModal.style.display = 'none'; }
+document.getElementById('dirModalClose').onclick = closeDirModal;
+dirModal.addEventListener('click', e => { if (e.target === dirModal) closeDirModal(); });
+document.getElementById('ctxPick').onclick = async () => {
+  dirList.innerHTML = '加载中…';
+  dirModal.style.display = 'flex';
+  try {
+    const r = await fetch('/api/dirs');
+    const d = await r.json();
+    if (!d.ok || !d.dirs || !d.dirs.length) { dirList.innerHTML = '<div class="modal-item">记录目录下暂无可选目录</div>'; return; }
+    dirList.innerHTML = '';
+    d.dirs.forEach(n => {
+      const item = document.createElement('div');
+      item.className = 'modal-item';
+      item.innerHTML = `<span class="name">${n}</span><span class="clear">使用</span>`;
+      item.querySelector('.clear').onclick = () => {
+        document.getElementById('ctxDir').value = `${d.base}/${n}`;
+        closeDirModal();
+      };
+      dirList.appendChild(item);
+    });
+  } catch (e) { dirList.innerHTML = '<div class="modal-item">加载失败：' + e.message + '</div>'; }
+};
+
+// 拉取可用模型 + 默认配置，填充后再渲染
+Promise.all([
+  fetch('/api/models').then(r => r.json()).catch(() => null),
+  fetch('/api/config').then(r => r.json()).catch(() => null),
+]).then(([m, c]) => {
+  if (m && m.models && m.models.length) MODELS = m.models;
+  if (c && c.ok) {
+    Object.assign(CFG, c);
+    if (CFG.rulePath) document.getElementById('rulePath').value = CFG.rulePath;
+    ROLES[0].model = CFG.modelStrong; ROLES[4].model = CFG.modelStrong;
+    ROLES[1].model = CFG.modelFast; ROLES[2].model = CFG.modelFast; ROLES[3].model = CFG.modelFast;
+  }
+  render();
+});
+</script>
+</body>
+</html>

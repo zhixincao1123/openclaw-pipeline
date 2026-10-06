@@ -1,0 +1,9 @@
+node_modules/
+server.log
+*.log
+
+# 本地配置（含个人路径/私有网关，勿提交）
+config.local.json
+
+# 运行产物
+runs/

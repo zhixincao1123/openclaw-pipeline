@@ -1,0 +1,10 @@
+{
+  "port": 8787,
+  "gatewayBase": "http://127.0.0.1:8080",
+  "modelFast": "gpt-4o-mini",
+  "modelStrong": "gpt-4o",
+  "rulePath": "",
+  "memoryDirs": [],
+  "docDirs": [],
+  "recordDir": "./runs"
+}

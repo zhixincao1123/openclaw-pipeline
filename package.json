@@ -1,0 +1,20 @@
+{
+  "name": "openclaw-pipeline",
+  "version": "1.0.0",
+  "description": "角色化 LLM 流水线：需求评审 → 开发 → 测试 → 提交 → 验收，支持上下文恢复与逐步人工确认。",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "llm",
+    "pipeline",
+    "openai",
+    "agent",
+    "orchestration"
+  ],
+  "license": "MIT"
+}
